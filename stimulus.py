@@ -22,9 +22,9 @@ import pandas as pd
 # Placeholder function for EEG setup and trigger recording
 load_dotenv(override=True)
 # IMAGE_PATH = "/Volumes/Rembr2Eject/nsd_stimuli.hdf5"
-IMAGE_PATH = "stimulus/nsd_stimuli.hdf5"
-EXP_PATH = "stimulus/nsd_expdesign.mat"
-COCO_MAP = "stimulus/nsd_stim_info_merged.pkl"
+IMAGE_PATH = "../stimulus-emotiv/stimulus/nsd_stimuli.hdf5"
+EXP_PATH = "../stimulus-emotiv/stimulus/nsd_expdesign.mat"
+COCO_MAP = "../stimulus-emotiv/stimulus/nsd_stim_info_merged.pkl"
 EMOTIV_ON = True
 headset_info = {} # update this with the headset info
 
@@ -309,22 +309,18 @@ def validate_block(block_trials):
 def create_trials(n_images, n_oddballs, num_blocks):
     trials = []
     for block in range(num_blocks):
-        isValidBlock = False
         block_trials = []
-        while not isValidBlock:
-            # Generate trials for each block
-            start = block * n_images + 1
-            end = start + n_images
-            images = list(range(start, end))
-            oddballs = [-1] * n_oddballs
-            block_trials = images + oddballs
-            
-            while True:
-                random.shuffle(block_trials)
-                if validate_block(block_trials):
-                    break
-            
-            isValidBlock = True
+        # Generate trials for each block
+        start = block * n_images + 1
+        end = start + n_images
+        images = list(range(start, end))
+        oddballs = [-1] * n_oddballs
+        block_trials = images + oddballs
+        
+        while True:
+            random.shuffle(block_trials)
+            if validate_block(block_trials):
+                break
 
         for idx, trial in enumerate(block_trials):
             trials.append({
@@ -340,7 +336,7 @@ def display_instructions(window, session_number):
     instruction_text = (
         f"Welcome to session {session_number} of the study.\n\n"
         "In this session, you will complete a perception task.\n"
-        "This session consists of 16 experimental blocks.\n\n"
+        "This session consists of 20 experimental blocks.\n\n"
         "You will see sequences of images appearing on the screen, your task is to "
         "press the space bar when you see an image appear twice in a row.\n\n"
         "Sit comfortably, and keep your gaze focused on the red dot.\n\n"
@@ -357,26 +353,10 @@ def display_instructions(window, session_number):
     event.waitKeys(keyList=['space'])
 
 def getImages(subj, session, n_images, num_blocks):
-    totalImages = n_images * num_blocks
-    # Mapping from integer id to NSD id
-    mat = loadmat(EXP_PATH)
-    subjectim = mat['subjectim'] # 1-indexed
-    sessionGroup = (int(session)-1) % 3
-    image_indices = subjectim[int(subj)-1][sessionGroup*totalImages : (sessionGroup + 1)*totalImages]
-    image_indices = image_indices -1 # img_map is 1-indexed
-    sorted_indices = np.argsort(image_indices)
-    inverse_indices = np.argsort(sorted_indices)  # To revert back to original order
+    pil_images = [Image.open(f"./stimulus/{index+1:04d}.png") for index in range(n_images)]
+    indices =  [i for i in range(n_images)]
 
-    # Mapping from NSD id to coco id
-    df = pd.read_pickle(COCO_MAP)
-    coco_ids = df.iloc[image_indices]['cocoId'].values
-
-    with h5py.File(IMAGE_PATH, 'r') as file:
-        dataset = file["imgBrick"]
-        sorted_images = dataset[image_indices[sorted_indices], :, :, :]  # Assuming index is within the valid range for dataset # pyright: ignore
-        images = sorted_images[inverse_indices]
-        pil_images = [Image.fromarray(img) for img in images]
-    return pil_images, coco_ids
+    return pil_images, indices
 
 async def run_experiment(trials, window, websocket, subj, session, n_images, num_blocks):
     last_image = None
@@ -430,10 +410,11 @@ async def run_experiment(trials, window, websocket, subj, session, n_images, num
         fixation_dot.draw()
         # Send trigger
         stim_time = time.time() * 1000
+        print(f"{indices[trial['image'] - 1]=} {is_oddball=}")
         await message_queue.put({'label': 'stim', 'value': indices[trial['image'] - 1] if not is_oddball else 100000, 'time': stim_time})
         # Display the image
         window.flip()
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
 
         # Rest screen with a fixation cross
         display_dot_with_jitter(window, 0.1, 0.4)
@@ -559,9 +540,9 @@ async def main():
     mouse.setPos((2560, 1440))
     
     # Production Parameters
-    n_images = 208  # Number of unique images per block (default 208)
-    n_oddballs = 24  # Number of oddball images per block (default 24)
-    num_blocks = 16  # Number of blocks
+    n_images = 100  # Number of unique images per block (default 208)
+    n_oddballs = 0  # Number of oddball images per block (default 24)
+    num_blocks = 20  # Number of blocks
 
     # Dev Parameters
     # n_images = 10  # Number of unique images per block (default 208)
@@ -583,7 +564,7 @@ async def main():
             await asyncio.gather(experiment_task, recording_task) #return exceptions=True
 
         else: 
-            await run_experiment(trials, window, websocket, participant_info['Subject'], participant_info['Session'], n_images, num_blocks, img_width, img_height)
+            await run_experiment(trials, window, websocket, participant_info['Subject'], participant_info['Session'], n_images, num_blocks)
 
         # Wind down and save results
         # Display completion message
