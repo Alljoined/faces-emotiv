@@ -21,10 +21,6 @@ import pandas as pd
 
 # Placeholder function for EEG setup and trigger recording
 load_dotenv(override=True)
-# IMAGE_PATH = "/Volumes/Rembr2Eject/nsd_stimuli.hdf5"
-IMAGE_PATH = "../stimulus-emotiv/stimulus/nsd_stimuli.hdf5"
-EXP_PATH = "../stimulus-emotiv/stimulus/nsd_expdesign.mat"
-COCO_MAP = "../stimulus-emotiv/stimulus/nsd_stim_info_merged.pkl"
 EMOTIV_ON = True
 headset_info = {} # update this with the headset info
 
@@ -295,18 +291,7 @@ async def process_triggers(websocket):
         message_queue.task_done()
 
 
-def validate_block(block_trials):
-    # Check for consecutive oddballs or oddball at the start
-    if block_trials[0] == -1:
-        return False  # Cannot start with an oddball
-
-    for i in range(len(block_trials)-2):
-        if block_trials[i] == -1 and (block_trials[i+1] == -1 or block_trials[i+2] == -1):
-            return False  # No back-to-back oddballs or repeated sequence
-
-    return True
-
-def create_trials(n_images, n_oddballs, num_blocks):
+def create_trials(n_images, num_blocks):
     trials = []
     for block in range(num_blocks):
         block_trials = []
@@ -314,13 +299,9 @@ def create_trials(n_images, n_oddballs, num_blocks):
         start = block * n_images + 1
         end = start + n_images
         images = list(range(start, end))
-        oddballs = [-1] * n_oddballs
-        block_trials = images + oddballs
+        block_trials = images
         
-        while True:
-            random.shuffle(block_trials)
-            if validate_block(block_trials):
-                break
+        random.shuffle(block_trials)
 
         for idx, trial in enumerate(block_trials):
             trials.append({
@@ -389,29 +370,20 @@ async def run_experiment(trials, window, websocket, subj, session, n_images, num
             # print(f"\nBlock {current_block}, Start Index: {start_index}")
             # print(f"Block {current_block}, End Index: {end_index}\n")
         
-        # Check if this trial is an oddball
-        is_oddball = (trial['image'] == -1)
-        if is_oddball:
-            image = last_image
-        else:
-            image = images[trial['image'] - 1] # Recall that trial['images] 1-indexed and images is 0 indexed
-            last_image = image
+        image = images[trial['image'] - 1] # Recall that trial['images] 1-indexed and images is 0 indexed
 
         # Append current image number to the sequence list
         image_sequence.append(trial['image'])
 
-        # Logging the trial details
-        # print(f"Block {trial['block']}, Trial {idx + 1}: Image {trial['image']} {'(Oddball)' if is_oddball else ''}")
-
         # Prepare the image
         image_stim = visual.ImageStim(win=window, image=image, pos=(0, 0), size=(7, 7), units="degFlat")
         image_stim.draw()
-        fixation_dot = visual.Circle(window, size=(0.2,0.2), fillColor=(1, -1, -1), lineColor=(-1, -1, -1), opacity=0.5, edges=128, units="degFlat")
-        fixation_dot.draw()
+        # fixation_dot = visual.Circle(window, size=(0.2,0.2), fillColor=(1, -1, -1), lineColor=(-1, -1, -1), opacity=0.5, edges=128, units="degFlat")
+        # fixation_dot.draw()
         # Send trigger
         stim_time = time.time() * 1000
-        print(f"{indices[trial['image'] - 1]=} {is_oddball=}")
-        await message_queue.put({'label': 'stim', 'value': indices[trial['image'] - 1] if not is_oddball else 100000, 'time': stim_time})
+        print(f"{indices[trial['image'] - 1]=}")
+        await message_queue.put({'label': 'stim', 'value': indices[trial['image'] - 1], 'time': stim_time})
         # Display the image
         window.flip()
         await asyncio.sleep(1)
@@ -441,20 +413,6 @@ async def run_experiment(trials, window, websocket, subj, session, n_images, num
                 display_message(window, "Saving recording...", block=False)
                 await export_and_delete_record(websocket, subj, session, current_block)
             break
-
-        # Record behavioural data (if space is or is not pressed with the oddball/non-oddball image)
-        if not is_oddball and not space_pressed:
-            # print("No oddball, no space")
-            await message_queue.put({'label': 'behav', 'value': 0, 'time': stim_time + 600})
-        elif not is_oddball and space_pressed:
-            # print("No oddball, space")
-            await message_queue.put({'label': 'behav', 'value': 1, 'time': space_time})
-        elif is_oddball and space_pressed:
-            # print("Oddball, space")
-            await message_queue.put({'label': 'behav', 'value': 2, 'time': space_time})
-        elif is_oddball and not space_pressed:
-            # print("Oddball, no space")
-            await message_queue.put({'label': 'behav', 'value': 3, 'time': stim_time + 600})
 
         # Check if end of block
         if trial['end_of_block']:
@@ -507,8 +465,8 @@ def display_message(window, text, block=False):
 def display_dot_with_jitter(window, base_time, jitter):
     rest_period = base_time + random.randint(0, int(jitter * 100)) / 100.0
     # Create a fixation dot with a black border and 50% opacity
-    fixation_dot = visual.Circle(window, size=(0.2,0.2), fillColor=(1, -1, -1), lineColor=(-1, -1, -1), opacity=0.5, edges=128, units="degFlat")
-    fixation_dot.draw()
+    # fixation_dot = visual.Circle(window, size=(0.2,0.2), fillColor=(1, -1, -1), lineColor=(-1, -1, -1), opacity=0.5, edges=128, units="degFlat")
+    # fixation_dot.draw()
     window.flip()
     core.wait(rest_period)
 
@@ -526,7 +484,7 @@ async def main():
     my_monitor = Monitor(name='Q27q-1L')
     my_monitor.setWidth(59.5)       # Monitor width in centimeters (physical size of screen)
     my_monitor.setDistance(80)    # Viewing distance in centimeters
-    my_monitor.setSizePix((2560, 1440))  # Resolution in pixels
+    my_monitor.setSizePix((1920, 1080))  # Resolution in pixels
     my_monitor.save()
 
     # Default
@@ -534,22 +492,20 @@ async def main():
     # window = visual.Window(screen=0, monitor="Q27q-1L", fullscr=False, size=(1920, 1080), color=(0, 0, 0), units='pix')
 
 
-    # Lenovo external monitor   
-    window = visual.Window(screen=0, monitor="Q27q-1L", fullscr=True, size=(2560, 1440), color=(0, 0, 0), units='pix')
+    # Asus external monitor   
+    window = visual.Window(screen=0, monitor="Q27q-1L", fullscr=True, size=(1920, 1080), color=(0, 0, 0), units='pix')
     mouse = event.Mouse(win=window)
-    mouse.setPos((2560, 1440))
+    mouse.setPos((1920, 1080))
     
     # Production Parameters
-    n_images = 100  # Number of unique images per block (default 208)
-    n_oddballs = 0  # Number of oddball images per block (default 24)
+    n_images = 100  # Number of unique images per block
     num_blocks = 20  # Number of blocks
 
     # Dev Parameters
     # n_images = 10  # Number of unique images per block (default 208)
-    # n_oddballs = 0  # Number of oddball images per block (default 24)
     # num_blocks = 10
 
-    trials = create_trials(n_images, n_oddballs, num_blocks)
+    trials = create_trials(n_images, num_blocks)
 
     # Setup EEG
     async with websockets.connect("wss://localhost:6868", ssl=ssl_context) as websocket:
