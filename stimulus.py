@@ -34,6 +34,22 @@ experiment_start_time = time.time()
 global_clock = Clock()
 global_clock.reset()
 
+# Face images
+imgWidth = 875
+imgHeight = 656
+
+# Calculate aspect ratio
+aspect_ratio = imgWidth / imgHeight
+
+# Longer dimension size in degrees
+longer_dim_size = 14  # degrees
+
+# Determine sizes maintaining the aspect ratio
+if imgWidth > imgHeight:
+    size_deg = (longer_dim_size, longer_dim_size / aspect_ratio)
+else:
+    size_deg = (longer_dim_size * aspect_ratio, longer_dim_size)
+
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -290,24 +306,22 @@ async def process_triggers(websocket):
         await record_trigger(message, websocket, False)
         message_queue.task_done()
 
-
 def create_trials(n_images, num_blocks):
     trials = []
-    for block in range(num_blocks):
-        block_trials = []
-        # Generate trials for each block
-        start = block * n_images + 1
-        end = start + n_images
-        images = list(range(start, end))
-        block_trials = images
-        
-        random.shuffle(block_trials)
 
+    image_list = list(range(1, n_images + 1))
+    image_list = image_list * 40 # repeated images 40 times now
+    random.shuffle(image_list)
+
+    block_size = int(len(image_list) / num_blocks)
+    for block in range(num_blocks):
+        block_trials = image_list[block*block_size:(block+1)*block_size]
+    
         for idx, trial in enumerate(block_trials):
             trials.append({
                 'block': (block + 1), 
                 'image': trial, 
-                'end_of_block': (idx == len(block_trials) - 1)
+                'end_of_block': (idx == block_size - 1)
             })
 
     return trials
@@ -318,8 +332,7 @@ def display_instructions(window, session_number):
         f"Welcome to session {session_number} of the study.\n\n"
         "In this session, you will complete a perception task.\n"
         "This session consists of 20 experimental blocks.\n\n"
-        "You will see sequences of images appearing on the screen, your task is to "
-        "press the space bar when you see an image appear twice in a row.\n\n"
+        "You will see sequences of images appearing on the screen.\n\n"
         "Sit comfortably, and keep your gaze focused on the red dot.\n\n"
         "When you are ready, press the space bar to start."
     )
@@ -365,31 +378,27 @@ async def run_experiment(trials, window, websocket, subj, session, n_images, num
     for idx, trial in enumerate(trials):
         if trial['block'] != current_block:
             current_block = trial['block']
-            start_index = (current_block - 1) * n_images
-            end_index = start_index + n_images
-            # print(f"\nBlock {current_block}, Start Index: {start_index}")
-            # print(f"Block {current_block}, End Index: {end_index}\n")
-        
+
         image = images[trial['image'] - 1] # Recall that trial['images] 1-indexed and images is 0 indexed
 
         # Append current image number to the sequence list
         image_sequence.append(trial['image'])
 
         # Prepare the image
-        image_stim = visual.ImageStim(win=window, image=image, pos=(0, 0), size=(7, 7), units="degFlat")
+        image_stim = visual.ImageStim(win=window, image=image, pos=(0, 0), size=size_deg, units="degFlat")
         image_stim.draw()
         # fixation_dot = visual.Circle(window, size=(0.2,0.2), fillColor=(1, -1, -1), lineColor=(-1, -1, -1), opacity=0.5, edges=128, units="degFlat")
         # fixation_dot.draw()
         # Send trigger
         stim_time = time.time() * 1000
-        print(f"{indices[trial['image'] - 1]=}")
-        await message_queue.put({'label': 'stim', 'value': indices[trial['image'] - 1], 'time': stim_time})
-        # Display the image
+        print(f"{idx}: {trial['image']=}")
+        await message_queue.put({'label': 'stim', 'value': trial['image'], 'time': stim_time})
+        # Display the image for 500ms
         window.flip()
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
         # Rest screen with a fixation cross
-        display_dot_with_jitter(window, 0.1, 0.4)
+        display_dot_with_jitter(window, 0.1, 0)
 
         keys = event.getKeys(keyList=["escape", "space"], timeStamped=global_clock)
 
@@ -483,7 +492,7 @@ async def main():
     # Monitor setup
     my_monitor = Monitor(name='Q27q-1L')
     my_monitor.setWidth(59.5)       # Monitor width in centimeters (physical size of screen)
-    my_monitor.setDistance(80)    # Viewing distance in centimeters
+    my_monitor.setDistance(60)    # Viewing distance in centimeters
     my_monitor.setSizePix((1920, 1080))  # Resolution in pixels
     my_monitor.save()
 
@@ -491,15 +500,14 @@ async def main():
     #window = visual.Window(fullscr=False, color=[0, 0, 0], units='pix')
     # window = visual.Window(screen=0, monitor="Q27q-1L", fullscr=False, size=(1920, 1080), color=(0, 0, 0), units='pix')
 
-
     # Asus external monitor   
     window = visual.Window(screen=0, monitor="Q27q-1L", fullscr=True, size=(1920, 1080), color=(0, 0, 0), units='pix')
     mouse = event.Mouse(win=window)
     mouse.setPos((1920, 1080))
     
     # Production Parameters
-    n_images = 100  # Number of unique images per block
-    num_blocks = 20  # Number of blocks
+    n_images = 100  # Total number of unique images
+    num_blocks = 20  # Division into number of blocks
 
     # Dev Parameters
     # n_images = 10  # Number of unique images per block (default 208)
