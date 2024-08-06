@@ -506,11 +506,11 @@ async def main():
     mouse.setPos((1920, 1080))
     
     # Production Parameters
-    n_images = 100  # Total number of unique images
+    n_images = 100  # Total number of unique images, repeated 40 times
     num_blocks = 20  # Division into number of blocks
 
     # Dev Parameters
-    # n_images = 10  # Number of unique images per block (default 208)
+    # n_images = 10
     # num_blocks = 10
 
     trials = create_trials(n_images, num_blocks)
